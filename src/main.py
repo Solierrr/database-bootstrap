@@ -49,7 +49,7 @@ class Settings:
     batch_size: int
     lock_lease_seconds: int
     minimum_ratio: float
-    wait_seconds: int
+    neo4j_wait_seconds: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
@@ -98,7 +98,7 @@ class Settings:
             batch_size=number("SYNC_BATCH_SIZE", 500, int, 1),
             lock_lease_seconds=number("SYNC_LOCK_LEASE_SECONDS", 900, int, 1),
             minimum_ratio=ratio,
-            wait_seconds=number("wait_seconds", 300, int),
+            neo4j_wait_seconds=number("NEO4J_WAIT_SECONDS", 300, int),
         )
 
 
@@ -307,7 +307,7 @@ def main() -> int:
         max_connection_pool_size=5,
     )
     try:
-        wait_until_available(driver, settings.wait_seconds)
+        wait_until_available(driver, settings.neo4j_wait_seconds)
         version, counts = run(settings, driver, postgres_loader(settings))
     except SyncInProgressError as error:
         logger.error("%s", error)
