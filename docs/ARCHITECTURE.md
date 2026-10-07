@@ -26,6 +26,7 @@ O GKE é efêmero. Quando o cluster é recriado, o Neo4j volta vazio e o bootstr
 |---|---|
 | `src/extract.sql` | o que sai do PostgreSQL, incluindo as regras de elegibilidade |
 | `src/graphs/` | a projeção em grafo, o lock, a validação, a ativação e a limpeza |
+| `src/config.json` | valores de configuração (fonte, defaults e limites das variáveis, timeouts) |
 | `src/main.py` | ler as variáveis de ambiente, mover as linhas do PostgreSQL para o Neo4j em lotes, chamar os arquivos Cypher na ordem e traduzir falhas em códigos de saída |
 
 Toda regra de negócio fica em SQL ou Cypher. O Python não conhece labels, relações nem colunas: ele descobre os datasets pelas seções de `src/extract.sql` e os estágios pelos arquivos de `src/graphs/nodes/` e `src/graphs/relationships/`.

@@ -115,13 +115,6 @@ def test_schema_has_one_statement_per_semicolon():
     assert all(statement.startswith(("CREATE CONSTRAINT", "CREATE INDEX")) for statement in statements)
 
 
-def test_chunks_split_rows_by_batch_size():
-    rows = [{"id": index} for index in range(5)]
-
-    assert [len(batch) for batch in main.chunks(rows, 2)] == [2, 2, 1]
-    assert list(main.chunks([], 2)) == []
-
-
 class FakeCursor:
     def __init__(self, connection):
         self.connection = connection
@@ -162,3 +155,10 @@ def test_extract_runs_every_dataset_and_sends_heartbeats(dataset_names):
 
 def test_extract_works_without_heartbeat():
     assert len(main.extract(FakeConnection())) == 10
+
+
+def test_tolerate_logs_and_swallows_failures(caplog):
+    with main._tolerate("falhou %s", "aqui"):
+        raise RuntimeError("boom")
+
+    assert "falhou aqui" in caplog.text

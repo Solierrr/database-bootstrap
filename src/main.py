@@ -1,13 +1,18 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
+from enum import IntEnum
+from itertools import batched
 from pathlib import Path
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 import psycopg
@@ -17,12 +22,8 @@ from psycopg import IsolationLevel
 from psycopg.rows import dict_row
 
 SRC = Path(__file__).parent
-SOURCE = "api-core"
-
-EXIT_FAILURE = 1
-EXIT_SYNC_IN_PROGRESS = 2
-EXIT_UNSAFE_SNAPSHOT = 3
-EXIT_CONFIGURATION = 64
+CONFIG: dict[str, Any] = json.loads((SRC / "config.json").read_text(encoding="utf-8"))
+SOURCE: str = CONFIG["source"]
 
 logger = logging.getLogger("database_bootstrap")
 
@@ -34,9 +35,18 @@ Rows = dict[str, list[dict]]
 Heartbeat = Callable[[], None]
 
 
-class SettingsError(RuntimeError): pass
-class SyncInProgressError(RuntimeError): pass
-class UnsafeSnapshotError(RuntimeError): pass
+class Exit(IntEnum):
+    SUCCESS = 0
+    FAILURE = 1
+    SYNC_IN_PROGRESS = 2
+    UNSAFE_SNAPSHOT = 3
+    CONFIGURATION = 64
+
+
+class BootstrapError(RuntimeError):
+    def __init__(self, message: str, exit_code: Exit = Exit.FAILURE) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 @dataclass(frozen=True)
@@ -49,61 +59,51 @@ class Settings:
     batch_size: int
     lock_lease_seconds: int
     minimum_ratio: float
-    wait_seconds: int
+    neo4j_wait_seconds: int
 
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         source = os.environ if env is None else env
-        required = (
-            "DB_POSTGRES_HOST",
-            "DB_POSTGRES_CORE",
-            "DB_POSTGRES_USER",
-            "DB_POSTGRES_PASSWORD",
-            "DB_NEO4J_URI",
-            "DB_NEO4J_USER",
-            "DB_NEO4J_PASSWORD",
-            "DB_NEO4J_FEED",
-        )
-        missing = [name for name in required if not source.get(name)]
+        missing = [name for name in CONFIG["required_env"] if not source.get(name)]
         if missing:
-            raise SettingsError("Variáveis de ambiente ausentes: " + ", ".join(missing))
+            raise BootstrapError("Variáveis de ambiente ausentes: " + ", ".join(missing), Exit.CONFIGURATION)
 
-        def number(name: str, default, cast, minimum=0):
-            raw = source.get(name) or default
+        def number(key: str) -> Any:
+            spec = CONFIG["numbers"][key]
+            raw = source.get(spec["env"]) or spec["default"]
             try:
-                value = cast(raw)
+                value = type(spec["default"])(raw)
             except ValueError as error:
-                raise SettingsError(f"{name} inválido: {raw!r}") from error
-            if value < minimum:
-                raise SettingsError(f"{name} deve ser maior ou igual a {minimum}")
+                raise BootstrapError(f"{spec['env']} inválido: {raw!r}", Exit.CONFIGURATION) from error
+            low, high = spec.get("min", 0), spec.get("max")
+            if value < low or (high is not None and value > high):
+                raise BootstrapError(
+                    f"{spec['env']} deve estar entre {low} e {'∞' if high is None else high}",
+                    Exit.CONFIGURATION,
+                )
             return value
-
-        ratio = number("SYNC_MIN_DOMAIN_RETENTION_RATIO", 0.5, float)
-        if ratio > 1:
-            raise SettingsError("SYNC_MIN_DOMAIN_RETENTION_RATIO deve estar entre 0 e 1")
 
         return cls(
             postgres={
                 "host": source["DB_POSTGRES_HOST"],
-                "port": number("DB_POSTGRES_PORT", 5432, int, 1),
+                "port": number("port"),
                 "dbname": source["DB_POSTGRES_CORE"],
                 "user": source["DB_POSTGRES_USER"],
                 "password": source["DB_POSTGRES_PASSWORD"],
-                "sslmode": source.get("DB_POSTGRES_SSLMODE") or "require",
+                "sslmode": source.get("DB_POSTGRES_SSLMODE") or CONFIG["postgres"]["sslmode"],
             },
             neo4j_uri=source["DB_NEO4J_URI"],
             neo4j_user=source["DB_NEO4J_USER"],
             neo4j_password=source["DB_NEO4J_PASSWORD"],
             neo4j_database=source["DB_NEO4J_FEED"],
-            batch_size=number("SYNC_BATCH_SIZE", 500, int, 1),
-            lock_lease_seconds=number("SYNC_LOCK_LEASE_SECONDS", 900, int, 1),
-            minimum_ratio=ratio,
-            wait_seconds=number("wait_seconds", 300, int),
+            batch_size=number("batch_size"),
+            lock_lease_seconds=number("lock_lease_seconds"),
+            minimum_ratio=number("minimum_ratio"),
+            neo4j_wait_seconds=number("neo4j_wait_seconds"),
         )
 
 
-@dataclass(frozen=True)
-class Stage:
+class Stage(NamedTuple):
     name: str
     dataset: str
     query: str
@@ -136,11 +136,6 @@ def stages() -> list[Stage]:
     return found
 
 
-def chunks(rows: list[dict], size: int) -> Iterator[list[dict]]:
-    for index in range(0, len(rows), size):
-        yield rows[index : index + size]
-
-
 def extract(connection: psycopg.Connection, heartbeat: Heartbeat | None = None) -> Rows:
     rows: Rows = {}
     for dataset, query in queries().items():
@@ -154,12 +149,23 @@ def extract(connection: psycopg.Connection, heartbeat: Heartbeat | None = None) 
 
 def postgres_loader(settings: Settings) -> Callable[[Heartbeat], Rows]:
     def load(heartbeat: Heartbeat) -> Rows:
-        with psycopg.connect(**settings.postgres, connect_timeout=15, row_factory=dict_row) as connection:
+        with psycopg.connect(
+            **settings.postgres, connect_timeout=CONFIG["postgres"]["connect_timeout"], row_factory=dict_row
+        ) as connection:
             connection.isolation_level = IsolationLevel.REPEATABLE_READ
             connection.read_only = True
             return extract(connection, heartbeat)
 
     return load
+
+
+@contextmanager
+def _tolerate(message: str, *args: object) -> Iterator[None]:
+    """Log and swallow a failure in a best-effort step."""
+    try:
+        yield
+    except Exception:
+        logger.exception(message, *args)
 
 
 def _run(session: Session, name: str, **parameters):
@@ -169,18 +175,16 @@ def _run(session: Session, name: str, **parameters):
 def _begin(session: Session, version: str, lease: int) -> str | None:
     record = _run(session, "acquire_lock", sync_version=version, lease_seconds=lease).single()
     if record is None:
-        raise SyncInProgressError("Já existe uma sincronização em andamento.")
-    try:
+        raise BootstrapError("Já existe uma sincronização em andamento.", Exit.SYNC_IN_PROGRESS)
+    with _tolerate("Falha ao recuperar versões órfãs; elas permanecerão pendentes"):
         orphans = _run(session, "register_unreferenced_versions", sync_version=version).single()
         _cleanup(session, version, list(orphans["cleanup_versions"] or []) if orphans else [])
-    except Exception:
-        logger.exception("Falha ao recuperar versões órfãs; elas permanecerão pendentes")
     return record["active_version"]
 
 
 def _renew(session: Session, version: str, lease: int) -> None:
     if _run(session, "renew_lock", sync_version=version, lease_seconds=lease).single() is None:
-        raise UnsafeSnapshotError("O lock da sincronização foi perdido antes da ativação.")
+        raise BootstrapError("O lock da sincronização foi perdido antes da ativação.", Exit.UNSAFE_SNAPSHOT)
 
 
 def _cleanup(session: Session, version: str, versions: list[str]) -> None:
@@ -191,16 +195,17 @@ def _cleanup(session: Session, version: str, versions: list[str]) -> None:
 
 
 def _abort(session: Session, version: str) -> None:
-    try:
+    with _tolerate("Falha ao descartar o staging da sincronização %s", version):
         registered = _run(session, "register_cleanup_version", sync_version=version, cleanup_version=version)
         if registered.single() is not None:
             _cleanup(session, version, [version])
-    except Exception:
-        logger.exception("Falha ao descartar o staging da sincronização %s", version)
-    try:
+    with _tolerate("Falha ao liberar o lock da sincronização %s", version):
         _run(session, "release_lock", sync_version=version).consume()
-    except Exception:
-        logger.exception("Falha ao liberar o lock da sincronização %s", version)
+
+
+def _apply_schema(session: Session) -> None:
+    for statement in filter(str.strip, cypher("schema").split(";")):
+        session.run(statement).consume()
 
 
 def _stage(session: Session, rows: Rows, version: str, settings: Settings) -> dict[str, int]:
@@ -208,12 +213,14 @@ def _stage(session: Session, rows: Rows, version: str, settings: Settings) -> di
     for stage in stages():
         staged = rows.get(stage.dataset, [])
         merged = 0
-        for batch in chunks(staged, settings.batch_size):
-            result = session.run(stage.query, source=SOURCE, sync_version=version, rows=batch).single()
+        for batch in batched(staged, settings.batch_size):
+            result = session.run(stage.query, source=SOURCE, sync_version=version, rows=list(batch)).single()
             merged += result["merged"]
             _renew(session, version, settings.lock_lease_seconds)
         if merged != len(staged):
-            raise UnsafeSnapshotError(f"{stage.name}: {len(staged)} linhas lidas, {merged} gravadas")
+            raise BootstrapError(
+                f"{stage.name}: {len(staged)} linhas lidas, {merged} gravadas", Exit.UNSAFE_SNAPSHOT
+            )
         counts[stage.name] = merged
     return counts
 
@@ -228,7 +235,9 @@ def _activate(session: Session, version: str) -> list[str]:
     if record is None:
         record = _run(session, "reconcile_activation", sync_version=version).single()
     if record is None:
-        raise failure or UnsafeSnapshotError("O lock da sincronização foi perdido antes da ativação.")
+        raise failure or BootstrapError(
+            "O lock da sincronização foi perdido antes da ativação.", Exit.UNSAFE_SNAPSHOT
+        )
     return list(record["cleanup_versions"] or [])
 
 
@@ -237,10 +246,7 @@ def run(settings: Settings, driver: Driver, load: Callable[[Heartbeat], Rows]) -
     lease = settings.lock_lease_seconds
 
     with driver.session(database=settings.neo4j_database) as session:
-        for statement in cypher("schema").split(";"):
-            if statement.strip():
-                session.run(statement).consume()
-
+        _apply_schema(session)
         active = _begin(session, version, lease)
         activated = False
         try:
@@ -256,28 +262,28 @@ def run(settings: Settings, driver: Driver, load: Callable[[Heartbeat], Rows]) -
             ).data()
             if violations:
                 drops = "; ".join(f"{v['name']}: {v['staged']}/{v['active']}" for v in violations)
-                raise UnsafeSnapshotError("Snapshot recusado por queda anormal de domínio: " + drops)
+                raise BootstrapError(
+                    "Snapshot recusado por queda anormal de domínio: " + drops, Exit.UNSAFE_SNAPSHOT
+                )
 
             _renew(session, version, lease)
             pending = _activate(session, version)
             activated = True
-            try:
+            with _tolerate("Snapshot ativado, mas a limpeza das versões %s falhou", pending):
                 _cleanup(session, version, pending)
-            except Exception:
-                logger.exception("Snapshot ativado, mas a limpeza das versões %s falhou", pending)
         finally:
             if activated:
-                try:
+                with _tolerate("Snapshot %s ativado, mas o lock não foi liberado", version):
                     _run(session, "release_lock", sync_version=version).consume()
-                except Exception:
-                    logger.exception("Snapshot %s ativado, mas o lock não foi liberado", version)
             else:
                 _abort(session, version)
 
     return version, counts
 
 
-def wait_until_available(driver: Driver, timeout_seconds: int, interval_seconds: float = 5.0) -> None:
+def wait_until_available(
+    driver: Driver, timeout_seconds: int, interval_seconds: float = CONFIG["neo4j"]["retry_interval"]
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     while True:
         try:
@@ -296,33 +302,23 @@ def main() -> int:
 
     try:
         settings = Settings.from_env()
-    except SettingsError as error:
+        with GraphDatabase.driver(
+            settings.neo4j_uri,
+            auth=(settings.neo4j_user, settings.neo4j_password),
+            connection_timeout=CONFIG["neo4j"]["connection_timeout"],
+            max_connection_pool_size=CONFIG["neo4j"]["max_pool_size"],
+        ) as driver:
+            wait_until_available(driver, settings.neo4j_wait_seconds)
+            version, counts = run(settings, driver, postgres_loader(settings))
+    except BootstrapError as error:
         logger.error("%s", error)
-        return EXIT_CONFIGURATION
-
-    driver = GraphDatabase.driver(
-        settings.neo4j_uri,
-        auth=(settings.neo4j_user, settings.neo4j_password),
-        connection_timeout=10,
-        max_connection_pool_size=5,
-    )
-    try:
-        wait_until_available(driver, settings.wait_seconds)
-        version, counts = run(settings, driver, postgres_loader(settings))
-    except SyncInProgressError as error:
-        logger.error("%s", error)
-        return EXIT_SYNC_IN_PROGRESS
-    except UnsafeSnapshotError as error:
-        logger.error("%s", error)
-        return EXIT_UNSAFE_SNAPSHOT
+        return error.exit_code
     except Exception:
         logger.exception("Falha no bootstrap do grafo")
-        return EXIT_FAILURE
-    finally:
-        driver.close()
+        return Exit.FAILURE
 
     logger.info("Snapshot %s ativado: %s", version, counts)
-    return 0
+    return Exit.SUCCESS
 
 
 if __name__ == "__main__":

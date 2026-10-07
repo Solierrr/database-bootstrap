@@ -142,8 +142,9 @@ def test_repeated_runs_are_idempotent_and_clean_old_versions(seeded_postgres, em
 def test_empty_snapshot_is_refused_and_keeps_the_active_version(seeded_postgres, empty_graph):
     first, _ = main.run(seeded_postgres, empty_graph, main.postgres_loader(seeded_postgres))
 
-    with pytest.raises(main.UnsafeSnapshotError):
+    with pytest.raises(main.BootstrapError) as refused:
         main.run(seeded_postgres, empty_graph, lambda heartbeat: {})
+    assert refused.value.exit_code == main.Exit.UNSAFE_SNAPSHOT
 
     current = graph_state(empty_graph, seeded_postgres)
     assert current["active"] == first
@@ -158,7 +159,7 @@ def test_abnormal_domain_drop_is_refused(seeded_postgres, empty_graph):
         rows = main.postgres_loader(seeded_postgres)(heartbeat)
         return {**rows, "panel_offers": []}
 
-    with pytest.raises(main.UnsafeSnapshotError, match="SolarOffer"):
+    with pytest.raises(main.BootstrapError, match="SolarOffer"):
         main.run(seeded_postgres, empty_graph, shrunken)
 
     assert graph_state(empty_graph, seeded_postgres)["active"] == first
@@ -173,7 +174,7 @@ def test_relationship_rows_without_endpoints_are_refused(seeded_postgres, empty_
         rows = main.postgres_loader(seeded_postgres)(heartbeat)
         return {**rows, "assignments": [{**row, "service_id": "missing"} for row in rows["assignments"]]}
 
-    with pytest.raises(main.UnsafeSnapshotError, match="affiliation_service"):
+    with pytest.raises(main.BootstrapError, match="affiliation_service"):
         main.run(seeded_postgres, empty_graph, orphaned)
 
     assert graph_state(empty_graph, seeded_postgres)["active"] is None
@@ -183,10 +184,11 @@ def test_concurrent_run_is_rejected_while_the_lock_is_held(seeded_postgres, empt
     with empty_graph.session(database=seeded_postgres.neo4j_database) as session:
         main._begin(session, "held-by-another-run", 600)
         try:
-            with pytest.raises(main.SyncInProgressError):
+            with pytest.raises(main.BootstrapError, match="em andamento") as rejected:
                 main.run(seeded_postgres, empty_graph, main.postgres_loader(seeded_postgres))
         finally:
             main._run(session, "release_lock", sync_version="held-by-another-run").consume()
+    assert rejected.value.exit_code == main.Exit.SYNC_IN_PROGRESS
 
 
 def test_main_runs_end_to_end_and_reports_lock_contention(seeded_postgres, empty_graph):
@@ -196,6 +198,6 @@ def test_main_runs_end_to_end_and_reports_lock_contention(seeded_postgres, empty
     with empty_graph.session(database=seeded_postgres.neo4j_database) as session:
         main._begin(session, "held-by-another-run", 600)
         try:
-            assert main.main() == main.EXIT_SYNC_IN_PROGRESS
+            assert main.main() == main.Exit.SYNC_IN_PROGRESS
         finally:
             main._run(session, "release_lock", sync_version="held-by-another-run").consume()

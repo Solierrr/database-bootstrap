@@ -32,7 +32,7 @@ O contrato do grafo (labels, relações e regra de elegibilidade) está document
 
 ## Configuração
 
-Todas as variáveis estão em [`.env.example`](.env.example). Em desenvolvimento use um `.env` local (ignorado pelo Git). No GKE elas vêm de um Secret criado a partir do Infisical, pastas `/feeddb` e `/database`.
+Todas as variáveis estão em [`.env.example`](.env.example). Os defaults, limites e timeouts de conexão ficam em [`src/config.json`](src/config.json). Em desenvolvimento use um `.env` local (ignorado pelo Git). No GKE elas vêm de um Secret criado a partir do Infisical, pastas `/feeddb` e `/database`.
 
 ## Estrutura
 
@@ -40,6 +40,7 @@ Todas as variáveis estão em [`.env.example`](.env.example). Em desenvolvimento
 src/
   main.py               liga PostgreSQL, Cypher e Neo4j; códigos de saída
   extract.sql           extração do PostgreSQL: um dataset por seção
+  config.json           nome da fonte, variáveis obrigatórias, defaults e limites, timeouts
   graphs/
     schema.cypher       constraints e índices
     nodes/              um arquivo por label
