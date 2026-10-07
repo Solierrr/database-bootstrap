@@ -1,12 +1,3 @@
-FROM python:3.12-slim AS build
-
-WORKDIR /app
-
-COPY pyproject.toml ./
-COPY src ./src
-
-RUN pip install --no-cache-dir --prefix=/install .
-
 FROM python:3.12-slim
 
 ENV PYTHONUNBUFFERED=1 \
@@ -14,13 +5,16 @@ ENV PYTHONUNBUFFERED=1 \
 
 WORKDIR /app
 
+COPY requirements.txt ./
+RUN pip install --no-cache-dir -r requirements.txt
+
 RUN useradd --system --uid 10001 --no-create-home bootstrap
 
-COPY --from=build /install /usr/local
+COPY src ./src
 COPY entrypoint.sh ./entrypoint.sh
 RUN chmod +x ./entrypoint.sh
 
 USER bootstrap
 
 ENTRYPOINT ["./entrypoint.sh"]
-CMD ["python", "-m", "database_bootstrap"]
+CMD ["python", "src/main.py"]
