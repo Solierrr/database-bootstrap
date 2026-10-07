@@ -1,3 +1,4 @@
+// dataset: panel_offers
 UNWIND $rows AS row
 MERGE (supplier:Supplier {graph_key: $source + '|' + $sync_version + '|' + row.supplier_id})
 SET supplier.id = row.supplier_id,
@@ -11,3 +12,4 @@ SET supplier.id = row.supplier_id,
     supplier.longitude = row.supplier_longitude,
     supplier.source = $source,
     supplier.sync_version = $sync_version
+RETURN count(*) AS merged

@@ -1,3 +1,4 @@
+// dataset: panel_offers
 UNWIND $rows AS row
 MERGE (model:SolarModel {graph_key: $source + '|' + $sync_version + '|' + row.model_id})
 SET model.id = row.model_id,
@@ -10,3 +11,4 @@ SET model.id = row.model_id,
     model.status = row.model_status,
     model.source = $source,
     model.sync_version = $sync_version
+RETURN count(*) AS merged

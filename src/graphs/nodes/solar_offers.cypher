@@ -1,3 +1,4 @@
+// dataset: panel_offers
 UNWIND $rows AS row
 MERGE (offer:SolarOffer {graph_key: $source + '|' + $sync_version + '|' + row.offer_id})
 SET offer.id = row.offer_id,
@@ -9,3 +10,4 @@ SET offer.id = row.offer_id,
     offer.accepted_proposal_quantity = row.accepted_proposal_quantity,
     offer.source = $source,
     offer.sync_version = $sync_version
+RETURN count(*) AS merged

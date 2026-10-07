@@ -1,3 +1,4 @@
+// dataset: technical_services
 UNWIND $rows AS row
 MERGE (service:TechnicalService {graph_key: $source + '|' + $sync_version + '|' + row.service_id})
 SET service.id = row.service_id,
@@ -14,3 +15,4 @@ SET service.id = row.service_id,
     service.longitude = row.longitude,
     service.source = $source,
     service.sync_version = $sync_version
+RETURN count(*) AS merged

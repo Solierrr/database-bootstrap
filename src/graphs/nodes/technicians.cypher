@@ -1,3 +1,4 @@
+// dataset: technicians
 UNWIND $rows AS row
 MERGE (technician:Technician {graph_key: $source + '|' + $sync_version + '|' + row.technician_id})
 SET technician.id = row.technician_id,
@@ -12,3 +13,4 @@ SET technician.id = row.technician_id,
     technician.active_workload = row.active_workload,
     technician.source = $source,
     technician.sync_version = $sync_version
+RETURN count(*) AS merged

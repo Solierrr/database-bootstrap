@@ -1,3 +1,4 @@
+// dataset: shifts
 UNWIND $rows AS row
 MERGE (shift:Shift {graph_key: $source + '|' + $sync_version + '|' + row.shift_id})
 SET shift.id = row.shift_id,
@@ -6,3 +7,4 @@ SET shift.id = row.shift_id,
     shift.end_at = row.end_at,
     shift.source = $source,
     shift.sync_version = $sync_version
+RETURN count(*) AS merged

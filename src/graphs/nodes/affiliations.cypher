@@ -1,3 +1,4 @@
+// dataset: affiliations
 UNWIND $rows AS row
 MERGE (affiliation:TechnicianAffiliation {graph_key: $source + '|' + $sync_version + '|' + row.affiliation_id})
 SET affiliation.id = row.affiliation_id,
@@ -10,3 +11,4 @@ SET affiliation.id = row.affiliation_id,
     affiliation.company_longitude = row.company_longitude,
     affiliation.source = $source,
     affiliation.sync_version = $sync_version
+RETURN count(*) AS merged

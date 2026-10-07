@@ -1,3 +1,4 @@
+// dataset: local_units
 UNWIND $rows AS row
 MERGE (unit:LocalUnit {graph_key: $source + '|' + $sync_version + '|' + row.id})
 SET unit.id = row.id,
@@ -8,3 +9,4 @@ SET unit.id = row.id,
     unit.longitude = row.longitude,
     unit.source = $source,
     unit.sync_version = $sync_version
+RETURN count(*) AS merged
