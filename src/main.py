@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import logging
 import os
 import re
@@ -8,6 +9,7 @@ import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
 from pathlib import Path
+from typing import Any
 from uuid import uuid4
 
 import psycopg
@@ -17,7 +19,8 @@ from psycopg import IsolationLevel
 from psycopg.rows import dict_row
 
 SRC = Path(__file__).parent
-SOURCE = "api-core"
+CONFIG: dict[str, Any] = json.loads((SRC / "config.json").read_text(encoding="utf-8"))
+SOURCE: str = CONFIG["source"]
 
 EXIT_FAILURE = 1
 EXIT_SYNC_IN_PROGRESS = 2
@@ -54,51 +57,39 @@ class Settings:
     @classmethod
     def from_env(cls, env: Mapping[str, str] | None = None) -> Settings:
         source = os.environ if env is None else env
-        required = (
-            "DB_POSTGRES_HOST",
-            "DB_POSTGRES_CORE",
-            "DB_POSTGRES_USER",
-            "DB_POSTGRES_PASSWORD",
-            "DB_NEO4J_URI",
-            "DB_NEO4J_USER",
-            "DB_NEO4J_PASSWORD",
-            "DB_NEO4J_FEED",
-        )
-        missing = [name for name in required if not source.get(name)]
+        missing = [name for name in CONFIG["required_env"] if not source.get(name)]
         if missing:
             raise SettingsError("Variáveis de ambiente ausentes: " + ", ".join(missing))
 
-        def number(name: str, default, cast, minimum=0):
-            raw = source.get(name) or default
+        def number(key: str) -> Any:
+            spec = CONFIG["numbers"][key]
+            raw = source.get(spec["env"]) or spec["default"]
             try:
-                value = cast(raw)
+                value = type(spec["default"])(raw)
             except ValueError as error:
-                raise SettingsError(f"{name} inválido: {raw!r}") from error
-            if value < minimum:
-                raise SettingsError(f"{name} deve ser maior ou igual a {minimum}")
+                raise SettingsError(f"{spec['env']} inválido: {raw!r}") from error
+            low, high = spec.get("min", 0), spec.get("max")
+            if value < low or (high is not None and value > high):
+                raise SettingsError(f"{spec['env']} deve estar entre {low} e {'∞' if high is None else high}")
             return value
-
-        ratio = number("SYNC_MIN_DOMAIN_RETENTION_RATIO", 0.5, float)
-        if ratio > 1:
-            raise SettingsError("SYNC_MIN_DOMAIN_RETENTION_RATIO deve estar entre 0 e 1")
 
         return cls(
             postgres={
                 "host": source["DB_POSTGRES_HOST"],
-                "port": number("DB_POSTGRES_PORT", 5432, int, 1),
+                "port": number("port"),
                 "dbname": source["DB_POSTGRES_CORE"],
                 "user": source["DB_POSTGRES_USER"],
                 "password": source["DB_POSTGRES_PASSWORD"],
-                "sslmode": source.get("DB_POSTGRES_SSLMODE") or "require",
+                "sslmode": source.get("DB_POSTGRES_SSLMODE") or CONFIG["postgres"]["sslmode"],
             },
             neo4j_uri=source["DB_NEO4J_URI"],
             neo4j_user=source["DB_NEO4J_USER"],
             neo4j_password=source["DB_NEO4J_PASSWORD"],
             neo4j_database=source["DB_NEO4J_FEED"],
-            batch_size=number("SYNC_BATCH_SIZE", 500, int, 1),
-            lock_lease_seconds=number("SYNC_LOCK_LEASE_SECONDS", 900, int, 1),
-            minimum_ratio=ratio,
-            neo4j_wait_seconds=number("NEO4J_WAIT_SECONDS", 300, int),
+            batch_size=number("batch_size"),
+            lock_lease_seconds=number("lock_lease_seconds"),
+            minimum_ratio=number("minimum_ratio"),
+            neo4j_wait_seconds=number("neo4j_wait_seconds"),
         )
 
 
@@ -154,7 +145,9 @@ def extract(connection: psycopg.Connection, heartbeat: Heartbeat | None = None) 
 
 def postgres_loader(settings: Settings) -> Callable[[Heartbeat], Rows]:
     def load(heartbeat: Heartbeat) -> Rows:
-        with psycopg.connect(**settings.postgres, connect_timeout=15, row_factory=dict_row) as connection:
+        with psycopg.connect(
+            **settings.postgres, connect_timeout=CONFIG["postgres"]["connect_timeout"], row_factory=dict_row
+        ) as connection:
             connection.isolation_level = IsolationLevel.REPEATABLE_READ
             connection.read_only = True
             return extract(connection, heartbeat)
@@ -277,7 +270,9 @@ def run(settings: Settings, driver: Driver, load: Callable[[Heartbeat], Rows]) -
     return version, counts
 
 
-def wait_until_available(driver: Driver, timeout_seconds: int, interval_seconds: float = 5.0) -> None:
+def wait_until_available(
+    driver: Driver, timeout_seconds: int, interval_seconds: float = CONFIG["neo4j"]["retry_interval"]
+) -> None:
     deadline = time.monotonic() + timeout_seconds
     while True:
         try:
@@ -303,8 +298,8 @@ def main() -> int:
     driver = GraphDatabase.driver(
         settings.neo4j_uri,
         auth=(settings.neo4j_user, settings.neo4j_password),
-        connection_timeout=10,
-        max_connection_pool_size=5,
+        connection_timeout=CONFIG["neo4j"]["connection_timeout"],
+        max_connection_pool_size=CONFIG["neo4j"]["max_pool_size"],
     )
     try:
         wait_until_available(driver, settings.neo4j_wait_seconds)

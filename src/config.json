@@ -1,0 +1,22 @@
+{
+  "source": "api-core",
+  "required_env": [
+    "DB_POSTGRES_HOST",
+    "DB_POSTGRES_CORE",
+    "DB_POSTGRES_USER",
+    "DB_POSTGRES_PASSWORD",
+    "DB_NEO4J_URI",
+    "DB_NEO4J_USER",
+    "DB_NEO4J_PASSWORD",
+    "DB_NEO4J_FEED"
+  ],
+  "numbers": {
+    "port": {"env": "DB_POSTGRES_PORT", "default": 5432, "min": 1},
+    "batch_size": {"env": "SYNC_BATCH_SIZE", "default": 500, "min": 1},
+    "lock_lease_seconds": {"env": "SYNC_LOCK_LEASE_SECONDS", "default": 900, "min": 1},
+    "minimum_ratio": {"env": "SYNC_MIN_DOMAIN_RETENTION_RATIO", "default": 0.5, "min": 0, "max": 1},
+    "neo4j_wait_seconds": {"env": "NEO4J_WAIT_SECONDS", "default": 300, "min": 0}
+  },
+  "postgres": {"sslmode": "require", "connect_timeout": 15},
+  "neo4j": {"connection_timeout": 10, "max_pool_size": 5, "retry_interval": 5.0}
+}
