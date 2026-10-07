@@ -10,8 +10,9 @@ from collections.abc import Callable, Iterator, Mapping
 from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import IntEnum
+from itertools import batched
 from pathlib import Path
-from typing import Any
+from typing import Any, NamedTuple
 from uuid import uuid4
 
 import psycopg
@@ -109,8 +110,7 @@ class Settings:
         )
 
 
-@dataclass(frozen=True)
-class Stage:
+class Stage(NamedTuple):
     name: str
     dataset: str
     query: str
@@ -141,11 +141,6 @@ def stages() -> list[Stage]:
                 raise ValueError(f"{path.name} precisa começar com '// dataset: <nome>'")
             found.append(Stage(f"{group}/{path.stem}", header.group(1), query))
     return found
-
-
-def chunks(rows: list[dict], size: int) -> Iterator[list[dict]]:
-    for index in range(0, len(rows), size):
-        yield rows[index : index + size]
 
 
 def extract(connection: psycopg.Connection, heartbeat: Heartbeat | None = None) -> Rows:
@@ -215,13 +210,18 @@ def _abort(session: Session, version: str) -> None:
         _run(session, "release_lock", sync_version=version).consume()
 
 
+def _apply_schema(session: Session) -> None:
+    for statement in filter(str.strip, cypher("schema").split(";")):
+        session.run(statement).consume()
+
+
 def _stage(session: Session, rows: Rows, version: str, settings: Settings) -> dict[str, int]:
     counts: dict[str, int] = {}
     for stage in stages():
         staged = rows.get(stage.dataset, [])
         merged = 0
-        for batch in chunks(staged, settings.batch_size):
-            result = session.run(stage.query, source=SOURCE, sync_version=version, rows=batch).single()
+        for batch in batched(staged, settings.batch_size):
+            result = session.run(stage.query, source=SOURCE, sync_version=version, rows=list(batch)).single()
             merged += result["merged"]
             _renew(session, version, settings.lock_lease_seconds)
         if merged != len(staged):
@@ -249,10 +249,7 @@ def run(settings: Settings, driver: Driver, load: Callable[[Heartbeat], Rows]) -
     lease = settings.lock_lease_seconds
 
     with driver.session(database=settings.neo4j_database) as session:
-        for statement in cypher("schema").split(";"):
-            if statement.strip():
-                session.run(statement).consume()
-
+        _apply_schema(session)
         active = _begin(session, version, lease)
         activated = False
         try:

@@ -115,13 +115,6 @@ def test_schema_has_one_statement_per_semicolon():
     assert all(statement.startswith(("CREATE CONSTRAINT", "CREATE INDEX")) for statement in statements)
 
 
-def test_chunks_split_rows_by_batch_size():
-    rows = [{"id": index} for index in range(5)]
-
-    assert [len(batch) for batch in main.chunks(rows, 2)] == [2, 2, 1]
-    assert list(main.chunks([], 2)) == []
-
-
 class FakeCursor:
     def __init__(self, connection):
         self.connection = connection
