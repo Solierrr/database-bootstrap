@@ -1,6 +1,6 @@
 import pytest
 
-from database_bootstrap.config.settings import Settings, SettingsError
+from main import Settings, SettingsError
 
 BASE_ENV = {
     "DB_POSTGRES_HOST": "db.example.com",
@@ -17,15 +17,20 @@ BASE_ENV = {
 def test_from_env_reads_required_values_and_applies_defaults():
     settings = Settings.from_env(BASE_ENV)
 
-    assert settings.postgres_host == "db.example.com"
-    assert settings.postgres_database == "coredb"
-    assert settings.postgres_port == 5432
-    assert settings.postgres_sslmode == "require"
+    assert settings.postgres == {
+        "host": "db.example.com",
+        "port": 5432,
+        "dbname": "coredb",
+        "user": "reader",
+        "password": "secret",
+        "sslmode": "require",
+    }
     assert settings.neo4j_uri == "bolt://feeddb:7687"
     assert settings.neo4j_database == "feeddb"
     assert settings.batch_size == 500
     assert settings.lock_lease_seconds == 900
-    assert settings.min_domain_retention_ratio == 0.5
+    assert settings.minimum_ratio == 0.5
+    assert settings.neo4j_wait_seconds == 300
 
 
 def test_from_env_reports_every_missing_variable():
@@ -51,11 +56,11 @@ def test_from_env_accepts_overrides():
 
     settings = Settings.from_env(env)
 
-    assert settings.postgres_port == 6543
-    assert settings.postgres_sslmode == "verify-full"
+    assert settings.postgres["port"] == 6543
+    assert settings.postgres["sslmode"] == "verify-full"
     assert settings.batch_size == 50
     assert settings.lock_lease_seconds == 120
-    assert settings.min_domain_retention_ratio == 0.8
+    assert settings.minimum_ratio == 0.8
     assert settings.neo4j_wait_seconds == 30
 
 

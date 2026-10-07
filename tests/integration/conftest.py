@@ -3,9 +3,9 @@ from pathlib import Path
 
 import psycopg
 import pytest
+from neo4j import GraphDatabase
 
-from database_bootstrap.clients.neo4j import create_driver
-from database_bootstrap.config.settings import Settings, SettingsError
+from main import Settings, SettingsError
 
 SEED = Path(__file__).parent / "fixtures" / "seed.sql"
 
@@ -22,7 +22,7 @@ def settings() -> Settings:
 
 @pytest.fixture(scope="session")
 def driver(settings):
-    instance = create_driver(settings)
+    instance = GraphDatabase.driver(settings.neo4j_uri, auth=(settings.neo4j_user, settings.neo4j_password))
     instance.verify_connectivity()
     yield instance
     instance.close()
@@ -30,15 +30,7 @@ def driver(settings):
 
 @pytest.fixture()
 def seeded_postgres(settings):
-    with psycopg.connect(
-        host=settings.postgres_host,
-        port=settings.postgres_port,
-        dbname=settings.postgres_database,
-        user=settings.postgres_user,
-        password=settings.postgres_password,
-        sslmode=settings.postgres_sslmode,
-        autocommit=True,
-    ) as connection:
+    with psycopg.connect(**settings.postgres, autocommit=True) as connection:
         connection.execute(SEED.read_text(encoding="utf-8"))
     return settings
 

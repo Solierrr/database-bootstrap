@@ -1,0 +1,16 @@
+CREATE CONSTRAINT sync_state_source IF NOT EXISTS FOR (n:SyncState) REQUIRE n.source IS UNIQUE;
+CREATE CONSTRAINT local_unit_graph_key IF NOT EXISTS FOR (n:LocalUnit) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT solar_offer_graph_key IF NOT EXISTS FOR (n:SolarOffer) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT solar_model_graph_key IF NOT EXISTS FOR (n:SolarModel) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT supplier_graph_key IF NOT EXISTS FOR (n:Supplier) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT technician_graph_key IF NOT EXISTS FOR (n:Technician) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT profession_graph_key IF NOT EXISTS FOR (n:Profession) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT affiliation_graph_key IF NOT EXISTS FOR (n:TechnicianAffiliation) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT shift_graph_key IF NOT EXISTS FOR (n:Shift) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT technical_service_graph_key IF NOT EXISTS FOR (n:TechnicalService) REQUIRE n.graph_key IS UNIQUE;
+CREATE CONSTRAINT service_experience_graph_key IF NOT EXISTS FOR (n:ServiceExperience) REQUIRE n.graph_key IS UNIQUE;
+CREATE INDEX local_unit_lookup IF NOT EXISTS FOR (n:LocalUnit) ON (n.source, n.sync_version, n.id);
+CREATE INDEX profession_lookup IF NOT EXISTS FOR (n:Profession) ON (n.source, n.sync_version, n.id);
+CREATE INDEX technical_service_lookup IF NOT EXISTS FOR (n:TechnicalService) ON (n.source, n.sync_version, n.id);
+CREATE INDEX offer_snapshot_lookup IF NOT EXISTS FOR (n:SolarOffer) ON (n.source, n.sync_version);
+CREATE INDEX affiliation_snapshot_lookup IF NOT EXISTS FOR (n:TechnicianAffiliation) ON (n.source, n.sync_version, n.active);
