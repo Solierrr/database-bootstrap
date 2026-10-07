@@ -1,26 +1,26 @@
-# TODO: imagem base
-# FROM
+FROM python:3.12-slim AS build
 
-# TODO: diretório de trabalho dentro do container
-# WORKDIR
+WORKDIR /app
 
-# TODO: copiar arquivos de dependências e instalar
-# COPY
-# RUN
+COPY pyproject.toml ./
+COPY src ./src
 
-# TODO: copiar o restante do código-fonte
-# COPY
+RUN pip install --no-cache-dir --prefix=/install .
 
-# TODO: copiar o entrypoint e torná-lo executável na imagem runtime
-# COPY entrypoint.sh ./entrypoint.sh
-# RUN chmod +x ./entrypoint.sh
+FROM python:3.12-slim
 
-# TODO: build da aplicação
-# RUN
+ENV PYTHONUNBUFFERED=1 \
+    PYTHONDONTWRITEBYTECODE=1
 
-# TODO: porta exposta pela aplicação
-# EXPOSE
+WORKDIR /app
 
-# TODO: comando de inicialização do container
-# ENTRYPOINT ["./entrypoint.sh"]
-# CMD ["<comando da aplicação>"]
+RUN useradd --system --uid 10001 --no-create-home bootstrap
+
+COPY --from=build /install /usr/local
+COPY entrypoint.sh ./entrypoint.sh
+RUN chmod +x ./entrypoint.sh
+
+USER bootstrap
+
+ENTRYPOINT ["./entrypoint.sh"]
+CMD ["python", "-m", "database_bootstrap"]
