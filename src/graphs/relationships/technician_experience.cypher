@@ -1,3 +1,4 @@
+// dataset: service_experiences
 UNWIND $rows AS row
 MATCH (technician:Technician {graph_key: $source + '|' + $sync_version + '|' + row.technician_id})
 MATCH (experience:ServiceExperience {
@@ -6,3 +7,4 @@ MATCH (experience:ServiceExperience {
 MERGE (technician)-[relation:HAS_EXPERIENCE]->(experience)
 SET relation.source = $source,
     relation.sync_version = $sync_version
+RETURN count(*) AS merged
