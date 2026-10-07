@@ -196,6 +196,6 @@ def test_main_runs_end_to_end_and_reports_lock_contention(seeded_postgres, empty
     with empty_graph.session(database=seeded_postgres.neo4j_database) as session:
         main._begin(session, "held-by-another-run", 600)
         try:
-            assert main.main() == main.EXIT_SYNC_IN_PROGRESS
+            assert main.main() == main.Exit.SYNC_IN_PROGRESS
         finally:
             main._run(session, "release_lock", sync_version="held-by-another-run").consume()

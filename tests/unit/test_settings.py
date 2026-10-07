@@ -1,5 +1,6 @@
 import pytest
 
+import main
 from main import Settings, SettingsError
 
 BASE_ENV = {
@@ -78,3 +79,23 @@ def test_from_env_accepts_overrides():
 def test_from_env_rejects_invalid_numbers(name, value):
     with pytest.raises(SettingsError):
         Settings.from_env({**BASE_ENV, name: value})
+
+
+def test_main_exits_with_configuration_code_when_env_is_missing(monkeypatch):
+    for name in main.CONFIG["required_env"]:
+        monkeypatch.delenv(name, raising=False)
+
+    assert main.main() == main.Exit.CONFIGURATION
+
+
+@pytest.mark.parametrize(
+    ("error", "code"),
+    [
+        (main.SettingsError, 64),
+        (main.SyncInProgressError, 2),
+        (main.UnsafeSnapshotError, 3),
+        (main.BootstrapError, 1),
+    ],
+)
+def test_each_bootstrap_error_carries_its_exit_code(error, code):
+    assert error.exit_code == code

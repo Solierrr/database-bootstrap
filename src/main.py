@@ -8,6 +8,7 @@ import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
 from dataclasses import dataclass
+from enum import IntEnum
 from pathlib import Path
 from typing import Any
 from uuid import uuid4
@@ -22,11 +23,6 @@ SRC = Path(__file__).parent
 CONFIG: dict[str, Any] = json.loads((SRC / "config.json").read_text(encoding="utf-8"))
 SOURCE: str = CONFIG["source"]
 
-EXIT_FAILURE = 1
-EXIT_SYNC_IN_PROGRESS = 2
-EXIT_UNSAFE_SNAPSHOT = 3
-EXIT_CONFIGURATION = 64
-
 logger = logging.getLogger("database_bootstrap")
 
 _SECTION = re.compile(r"^--\s*(dataset|fragment):\s*(\w+)\s*$", re.MULTILINE)
@@ -37,9 +33,28 @@ Rows = dict[str, list[dict]]
 Heartbeat = Callable[[], None]
 
 
-class SettingsError(RuntimeError): pass
-class SyncInProgressError(RuntimeError): pass
-class UnsafeSnapshotError(RuntimeError): pass
+class Exit(IntEnum):
+    SUCCESS = 0
+    FAILURE = 1
+    SYNC_IN_PROGRESS = 2
+    UNSAFE_SNAPSHOT = 3
+    CONFIGURATION = 64
+
+
+class BootstrapError(RuntimeError):
+    exit_code = Exit.FAILURE
+
+
+class SettingsError(BootstrapError):
+    exit_code = Exit.CONFIGURATION
+
+
+class SyncInProgressError(BootstrapError):
+    exit_code = Exit.SYNC_IN_PROGRESS
+
+
+class UnsafeSnapshotError(BootstrapError):
+    exit_code = Exit.UNSAFE_SNAPSHOT
 
 
 @dataclass(frozen=True)
@@ -291,33 +306,23 @@ def main() -> int:
 
     try:
         settings = Settings.from_env()
-    except SettingsError as error:
+        with GraphDatabase.driver(
+            settings.neo4j_uri,
+            auth=(settings.neo4j_user, settings.neo4j_password),
+            connection_timeout=CONFIG["neo4j"]["connection_timeout"],
+            max_connection_pool_size=CONFIG["neo4j"]["max_pool_size"],
+        ) as driver:
+            wait_until_available(driver, settings.neo4j_wait_seconds)
+            version, counts = run(settings, driver, postgres_loader(settings))
+    except BootstrapError as error:
         logger.error("%s", error)
-        return EXIT_CONFIGURATION
-
-    driver = GraphDatabase.driver(
-        settings.neo4j_uri,
-        auth=(settings.neo4j_user, settings.neo4j_password),
-        connection_timeout=CONFIG["neo4j"]["connection_timeout"],
-        max_connection_pool_size=CONFIG["neo4j"]["max_pool_size"],
-    )
-    try:
-        wait_until_available(driver, settings.neo4j_wait_seconds)
-        version, counts = run(settings, driver, postgres_loader(settings))
-    except SyncInProgressError as error:
-        logger.error("%s", error)
-        return EXIT_SYNC_IN_PROGRESS
-    except UnsafeSnapshotError as error:
-        logger.error("%s", error)
-        return EXIT_UNSAFE_SNAPSHOT
+        return error.exit_code
     except Exception:
         logger.exception("Falha no bootstrap do grafo")
-        return EXIT_FAILURE
-    finally:
-        driver.close()
+        return Exit.FAILURE
 
     logger.info("Snapshot %s ativado: %s", version, counts)
-    return 0
+    return Exit.SUCCESS
 
 
 if __name__ == "__main__":
