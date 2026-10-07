@@ -162,3 +162,10 @@ def test_extract_runs_every_dataset_and_sends_heartbeats(dataset_names):
 
 def test_extract_works_without_heartbeat():
     assert len(main.extract(FakeConnection())) == 10
+
+
+def test_tolerate_logs_and_swallows_failures(caplog):
+    with main._tolerate("falhou %s", "aqui"):
+        raise RuntimeError("boom")
+
+    assert "falhou aqui" in caplog.text

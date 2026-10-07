@@ -7,6 +7,7 @@ import re
 import sys
 import time
 from collections.abc import Callable, Iterator, Mapping
+from contextlib import contextmanager
 from dataclasses import dataclass
 from enum import IntEnum
 from pathlib import Path
@@ -170,6 +171,15 @@ def postgres_loader(settings: Settings) -> Callable[[Heartbeat], Rows]:
     return load
 
 
+@contextmanager
+def _tolerate(message: str, *args: object) -> Iterator[None]:
+    """Log and swallow a failure in a best-effort step."""
+    try:
+        yield
+    except Exception:
+        logger.exception(message, *args)
+
+
 def _run(session: Session, name: str, **parameters):
     return session.run(cypher(f"snapshot/{name}"), source=SOURCE, **parameters)
 
@@ -178,11 +188,9 @@ def _begin(session: Session, version: str, lease: int) -> str | None:
     record = _run(session, "acquire_lock", sync_version=version, lease_seconds=lease).single()
     if record is None:
         raise SyncInProgressError("Já existe uma sincronização em andamento.")
-    try:
+    with _tolerate("Falha ao recuperar versões órfãs; elas permanecerão pendentes"):
         orphans = _run(session, "register_unreferenced_versions", sync_version=version).single()
         _cleanup(session, version, list(orphans["cleanup_versions"] or []) if orphans else [])
-    except Exception:
-        logger.exception("Falha ao recuperar versões órfãs; elas permanecerão pendentes")
     return record["active_version"]
 
 
@@ -199,16 +207,12 @@ def _cleanup(session: Session, version: str, versions: list[str]) -> None:
 
 
 def _abort(session: Session, version: str) -> None:
-    try:
+    with _tolerate("Falha ao descartar o staging da sincronização %s", version):
         registered = _run(session, "register_cleanup_version", sync_version=version, cleanup_version=version)
         if registered.single() is not None:
             _cleanup(session, version, [version])
-    except Exception:
-        logger.exception("Falha ao descartar o staging da sincronização %s", version)
-    try:
+    with _tolerate("Falha ao liberar o lock da sincronização %s", version):
         _run(session, "release_lock", sync_version=version).consume()
-    except Exception:
-        logger.exception("Falha ao liberar o lock da sincronização %s", version)
 
 
 def _stage(session: Session, rows: Rows, version: str, settings: Settings) -> dict[str, int]:
@@ -269,16 +273,12 @@ def run(settings: Settings, driver: Driver, load: Callable[[Heartbeat], Rows]) -
             _renew(session, version, lease)
             pending = _activate(session, version)
             activated = True
-            try:
+            with _tolerate("Snapshot ativado, mas a limpeza das versões %s falhou", pending):
                 _cleanup(session, version, pending)
-            except Exception:
-                logger.exception("Snapshot ativado, mas a limpeza das versões %s falhou", pending)
         finally:
             if activated:
-                try:
+                with _tolerate("Snapshot %s ativado, mas o lock não foi liberado", version):
                     _run(session, "release_lock", sync_version=version).consume()
-                except Exception:
-                    logger.exception("Snapshot %s ativado, mas o lock não foi liberado", version)
             else:
                 _abort(session, version)
 
