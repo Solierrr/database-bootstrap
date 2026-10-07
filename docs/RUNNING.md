@@ -6,7 +6,7 @@ Requisitos: Python 3.12 ou superior, Docker e `psql`.
 
 ```bash
 python -m venv .venv
-.venv/bin/python -m pip install -e ".[dev]"
+.venv/bin/python -m pip install -r requirements.dev.txt
 ```
 
 No Windows, use `.venv/Scripts/python`.
@@ -45,7 +45,7 @@ export DB_POSTGRES_HOST=127.0.0.1 DB_POSTGRES_PORT=5432 DB_POSTGRES_CORE=coredb 
 ## Executar o job
 
 ```bash
-.venv/bin/python -m database_bootstrap
+.venv/bin/python src/main.py
 ```
 
 ## Testes
