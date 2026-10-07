@@ -5,7 +5,7 @@ import psycopg
 import pytest
 from neo4j import GraphDatabase
 
-from main import Settings, SettingsError
+from main import BootstrapError, Settings
 
 SEED = Path(__file__).parent / "fixtures" / "seed.sql"
 
@@ -16,7 +16,7 @@ def settings() -> Settings:
         pytest.skip("defina BOOTSTRAP_TEST_ALLOW_DESTRUCTIVE=true para rodar contra bancos descartáveis")
     try:
         return Settings.from_env()
-    except SettingsError as error:
+    except BootstrapError as error:
         pytest.skip(str(error))
 
 

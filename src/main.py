@@ -44,19 +44,9 @@ class Exit(IntEnum):
 
 
 class BootstrapError(RuntimeError):
-    exit_code = Exit.FAILURE
-
-
-class SettingsError(BootstrapError):
-    exit_code = Exit.CONFIGURATION
-
-
-class SyncInProgressError(BootstrapError):
-    exit_code = Exit.SYNC_IN_PROGRESS
-
-
-class UnsafeSnapshotError(BootstrapError):
-    exit_code = Exit.UNSAFE_SNAPSHOT
+    def __init__(self, message: str, exit_code: Exit = Exit.FAILURE) -> None:
+        super().__init__(message)
+        self.exit_code = exit_code
 
 
 @dataclass(frozen=True)
@@ -76,7 +66,7 @@ class Settings:
         source = os.environ if env is None else env
         missing = [name for name in CONFIG["required_env"] if not source.get(name)]
         if missing:
-            raise SettingsError("Variáveis de ambiente ausentes: " + ", ".join(missing))
+            raise BootstrapError("Variáveis de ambiente ausentes: " + ", ".join(missing), Exit.CONFIGURATION)
 
         def number(key: str) -> Any:
             spec = CONFIG["numbers"][key]
@@ -84,10 +74,13 @@ class Settings:
             try:
                 value = type(spec["default"])(raw)
             except ValueError as error:
-                raise SettingsError(f"{spec['env']} inválido: {raw!r}") from error
+                raise BootstrapError(f"{spec['env']} inválido: {raw!r}", Exit.CONFIGURATION) from error
             low, high = spec.get("min", 0), spec.get("max")
             if value < low or (high is not None and value > high):
-                raise SettingsError(f"{spec['env']} deve estar entre {low} e {'∞' if high is None else high}")
+                raise BootstrapError(
+                    f"{spec['env']} deve estar entre {low} e {'∞' if high is None else high}",
+                    Exit.CONFIGURATION,
+                )
             return value
 
         return cls(
@@ -182,7 +175,7 @@ def _run(session: Session, name: str, **parameters):
 def _begin(session: Session, version: str, lease: int) -> str | None:
     record = _run(session, "acquire_lock", sync_version=version, lease_seconds=lease).single()
     if record is None:
-        raise SyncInProgressError("Já existe uma sincronização em andamento.")
+        raise BootstrapError("Já existe uma sincronização em andamento.", Exit.SYNC_IN_PROGRESS)
     with _tolerate("Falha ao recuperar versões órfãs; elas permanecerão pendentes"):
         orphans = _run(session, "register_unreferenced_versions", sync_version=version).single()
         _cleanup(session, version, list(orphans["cleanup_versions"] or []) if orphans else [])
@@ -191,7 +184,7 @@ def _begin(session: Session, version: str, lease: int) -> str | None:
 
 def _renew(session: Session, version: str, lease: int) -> None:
     if _run(session, "renew_lock", sync_version=version, lease_seconds=lease).single() is None:
-        raise UnsafeSnapshotError("O lock da sincronização foi perdido antes da ativação.")
+        raise BootstrapError("O lock da sincronização foi perdido antes da ativação.", Exit.UNSAFE_SNAPSHOT)
 
 
 def _cleanup(session: Session, version: str, versions: list[str]) -> None:
@@ -225,7 +218,9 @@ def _stage(session: Session, rows: Rows, version: str, settings: Settings) -> di
             merged += result["merged"]
             _renew(session, version, settings.lock_lease_seconds)
         if merged != len(staged):
-            raise UnsafeSnapshotError(f"{stage.name}: {len(staged)} linhas lidas, {merged} gravadas")
+            raise BootstrapError(
+                f"{stage.name}: {len(staged)} linhas lidas, {merged} gravadas", Exit.UNSAFE_SNAPSHOT
+            )
         counts[stage.name] = merged
     return counts
 
@@ -240,7 +235,9 @@ def _activate(session: Session, version: str) -> list[str]:
     if record is None:
         record = _run(session, "reconcile_activation", sync_version=version).single()
     if record is None:
-        raise failure or UnsafeSnapshotError("O lock da sincronização foi perdido antes da ativação.")
+        raise failure or BootstrapError(
+            "O lock da sincronização foi perdido antes da ativação.", Exit.UNSAFE_SNAPSHOT
+        )
     return list(record["cleanup_versions"] or [])
 
 
@@ -265,7 +262,9 @@ def run(settings: Settings, driver: Driver, load: Callable[[Heartbeat], Rows]) -
             ).data()
             if violations:
                 drops = "; ".join(f"{v['name']}: {v['staged']}/{v['active']}" for v in violations)
-                raise UnsafeSnapshotError("Snapshot recusado por queda anormal de domínio: " + drops)
+                raise BootstrapError(
+                    "Snapshot recusado por queda anormal de domínio: " + drops, Exit.UNSAFE_SNAPSHOT
+                )
 
             _renew(session, version, lease)
             pending = _activate(session, version)

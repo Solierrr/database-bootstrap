@@ -1,7 +1,7 @@
 import pytest
 
 import main
-from main import Settings, SettingsError
+from main import BootstrapError, Settings
 
 BASE_ENV = {
     "DB_POSTGRES_HOST": "db.example.com",
@@ -37,7 +37,7 @@ def test_from_env_reads_required_values_and_applies_defaults():
 def test_from_env_reports_every_missing_variable():
     env = {key: value for key, value in BASE_ENV.items() if key not in {"DB_NEO4J_FEED", "DB_POSTGRES_HOST"}}
 
-    with pytest.raises(SettingsError) as error:
+    with pytest.raises(BootstrapError) as error:
         Settings.from_env(env)
 
     assert "DB_NEO4J_FEED" in str(error.value)
@@ -77,7 +77,7 @@ def test_from_env_accepts_overrides():
     ],
 )
 def test_from_env_rejects_invalid_numbers(name, value):
-    with pytest.raises(SettingsError):
+    with pytest.raises(BootstrapError):
         Settings.from_env({**BASE_ENV, name: value})
 
 
@@ -88,14 +88,10 @@ def test_main_exits_with_configuration_code_when_env_is_missing(monkeypatch):
     assert main.main() == main.Exit.CONFIGURATION
 
 
-@pytest.mark.parametrize(
-    ("error", "code"),
-    [
-        (main.SettingsError, 64),
-        (main.SyncInProgressError, 2),
-        (main.UnsafeSnapshotError, 3),
-        (main.BootstrapError, 1),
-    ],
-)
-def test_each_bootstrap_error_carries_its_exit_code(error, code):
-    assert error.exit_code == code
+def test_main_returns_the_exit_code_carried_by_the_error(monkeypatch):
+    def refuse():
+        raise BootstrapError("recusado", main.Exit.UNSAFE_SNAPSHOT)
+
+    monkeypatch.setattr(main.Settings, "from_env", refuse)
+
+    assert main.main() == main.Exit.UNSAFE_SNAPSHOT
