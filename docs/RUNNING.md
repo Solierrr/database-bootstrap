@@ -1,6 +1,6 @@
 # Rodando localmente
 
-Requisitos: Python 3.12 ou superior, Docker e `psql`.
+Requisitos: Python 3.14, Docker e `psql`.
 
 ## Instalação
 

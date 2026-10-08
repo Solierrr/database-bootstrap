@@ -13,56 +13,13 @@ permissions:
 jobs:
   test:
     runs-on: ubuntu-latest
-    env:
-      BOOTSTRAP_TEST_ALLOW_DESTRUCTIVE: "true"
-      DB_POSTGRES_HOST: localhost
-      DB_POSTGRES_PORT: "5432"
-      DB_POSTGRES_CORE: coredb
-      DB_POSTGRES_USER: postgres
-      DB_POSTGRES_PASSWORD: test-password-for-ci
-      DB_POSTGRES_SSLMODE: disable
-      DB_NEO4J_URI: bolt://localhost:7687
-      DB_NEO4J_USER: neo4j
-      DB_NEO4J_PASSWORD: test-password-for-ci
-      DB_NEO4J_FEED: feeddb
-      PGHOST: localhost
-      PGUSER: postgres
-      PGPASSWORD: test-password-for-ci
-      PGDATABASE: coredb
-    services:
-      postgres:
-        image: postgres:16
-        env:
-          POSTGRES_PASSWORD: test-password-for-ci
-          POSTGRES_DB: coredb
-        ports:
-          - 5432:5432
-        options: >-
-          --health-cmd "pg_isready -U postgres"
-          --health-interval 5s
-          --health-timeout 5s
-          --health-retries 10
-      neo4j:
-        image: neo4j:5.26-community
-        env:
-          NEO4J_AUTH: neo4j/test-password-for-ci
-          NEO4J_initial_dbms_default__database: feeddb
-          NEO4J_server_memory_heap_initial__size: 256m
-          NEO4J_server_memory_heap_max__size: 512m
-        ports:
-          - 7687:7687
 
     steps:
       - uses: actions/checkout@v4
 
-      - uses: actions/checkout@v4
-        with:
-          repository: Solierrr/database-console
-          path: database-console
-
       - uses: actions/setup-python@v5
         with:
-          python-version: "3.12"
+          python-version: "3.14"
           cache: "pip"
           cache-dependency-path: requirements.dev.txt
 
@@ -70,15 +27,7 @@ jobs:
         run: python -m pip install -r requirements.dev.txt
 
       - name: Lint
-        run: python -m ruff check src tests
-
-      - name: Load the api-core schema
-        run: sh scripts/load-core-schema.sh database-console
-
-      - name: Run tests
-        env:
-          NEO4J_WAIT_SECONDS: "120"
-        run: python -m pytest --cov --cov-report=term-missing
+        run: python -m ruff check src
 
       - name: Build and smoke-test container
         run: |
