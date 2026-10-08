@@ -213,7 +213,7 @@ def _stage(session: Session, rows: Rows, version: str, settings: Settings) -> di
     for stage in stages():
         staged = rows.get(stage.dataset, [])
         merged = 0
-        for batch in batched(staged, settings.batch_size):
+        for batch in batched(staged, settings.batch_size, strict=False):
             result = session.run(stage.query, source=SOURCE, sync_version=version, rows=list(batch)).single()
             merged += result["merged"]
             _renew(session, version, settings.lock_lease_seconds)
