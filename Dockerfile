@@ -11,10 +11,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 RUN useradd --system --uid 10001 --no-create-home bootstrap
 
 COPY src ./src
-COPY entrypoint.sh ./entrypoint.sh
-RUN chmod +x ./entrypoint.sh
 
 USER bootstrap
 
-ENTRYPOINT ["./entrypoint.sh"]
 CMD ["python", "src/main.py"]
