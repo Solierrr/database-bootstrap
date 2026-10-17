@@ -80,7 +80,7 @@ company_geolocation AS (
 )
 SELECT
     model.id::text AS model_id,
-    model.brand,
+    brand.name AS brand,
     model.model AS model,
     model.power_wp::double precision AS power_wp,
     model.efficiency::double precision AS efficiency,
@@ -106,6 +106,8 @@ SELECT
 FROM offer
 JOIN model
   ON model.id = offer.fk_model
+JOIN brand
+  ON brand.id = model.fk_brand
 JOIN supplier
   ON supplier.id = offer.fk_supplier
 JOIN company
