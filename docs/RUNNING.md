@@ -24,12 +24,7 @@ docker run -d --name bootstrap-postgres -p 127.0.0.1:5432:5432 \
   postgres:16
 ```
 
-Carregue o schema do `api-core` a partir de um checkout de `Solierrr/database-console`:
-
-```bash
-PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=test-password-for-ci PGDATABASE=coredb \
-  sh scripts/load-core-schema.sh ../database-console
-```
+Prepare o `coredb` de teste com o baseline Flyway do `api-core` e com as views do schema `export` definidas no contrato de views de exportação. O job lê somente essas views, com o papel `ro_bootstrap` (`DB_POSTGRES_USER`), que não tem acesso a `public`.
 
 Se alguma porta já estiver em uso, troque o lado esquerdo do `-p` e ajuste as variáveis abaixo.
 
