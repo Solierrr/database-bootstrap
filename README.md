@@ -1,6 +1,6 @@
 # database-bootstrap
 
-Job que reconstrói o grafo Neo4j `feeddb` a partir do PostgreSQL do `api-core` (`coredb`). O PostgreSQL é a fonte de verdade e o Neo4j é uma projeção descartável: se o cluster for recriado, o grafo volta vazio e este job o repovoa.
+Job que reconstrói o grafo Neo4j `feeddb` a partir das views de exportação (schema `export`) do PostgreSQL do `api-core` (`coredb`). O PostgreSQL é a fonte de verdade e o Neo4j é uma projeção descartável: se o cluster for recriado, o grafo volta vazio e este job o repovoa.
 
 Não é um serviço. Não expõe HTTP, não tem Service nem Ingress e só consome CPU e memória enquanto roda. Ele depende apenas do PostgreSQL e do Neo4j, nunca de uma API da aplicação.
 
@@ -8,7 +8,7 @@ Não é um serviço. Não expõe HTTP, não tem Service nem Ingress e só consom
 
 A sincronização é descrita em Cypher (`src/graphs/`). O SQL é só a extração, em um único arquivo (`src/extract.sql`). O Python (`src/main.py`) só liga as pontas: lê as linhas do PostgreSQL, entrega cada lote ao Cypher e chama os passos na ordem certa.
 
-1. `src/extract.sql` extrai os dados do `coredb` em uma transação `REPEATABLE READ` somente leitura, uma consulta por dataset.
+1. `src/extract.sql` extrai os dados das views do schema `export` do `coredb` em uma transação `REPEATABLE READ` somente leitura, uma consulta por dataset.
 2. `src/graphs/schema.cypher` garante constraints e índices.
 3. `src/graphs/snapshot/acquire_lock.cypher` toma o lock com lease. Outra execução recebe código de saída 2.
 4. `src/graphs/nodes/` e depois `src/graphs/relationships/` gravam o snapshot novo, com `MERGE` e `UNWIND $rows`. Cada arquivo declara na primeira linha o dataset que consome (`// dataset: <nome>`) e devolve `count(*) AS merged`; se uma linha lida não foi gravada (por exemplo, uma relação sem ponta), a execução é recusada.

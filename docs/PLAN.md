@@ -4,7 +4,7 @@ Itens que ainda não existem, em ordem de dependência. O que já está pronto e
 
 ## 1. Operação do job no cluster
 
-- Usuário somente leitura do PostgreSQL para o job. Hoje ele usa o `DB_POSTGRES_USER` de `/database`, que é o usuário da aplicação.
+- Configurar o `DB_POSTGRES_USER` do job com o papel somente leitura `ro_bootstrap`, que lê apenas as views do schema `export`. Até lá ele usa o usuário da aplicação de `/database`.
 - Confirmar no banco real que a migração `V10__technician_review_status` (`technician.status`) está aplicada, já que a elegibilidade de técnico depende dela.
 - Calibrar `SYNC_BATCH_SIZE` e os limites de memória do Job com o volume real de dados.
 - Alerta de falha: enquanto o OTEL não funciona, só o status do Job no ArgoCD mostra uma falha.

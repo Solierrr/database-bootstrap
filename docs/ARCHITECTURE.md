@@ -51,7 +51,7 @@ Toda regra de negócio fica em SQL ou Cypher. O Python não conhece labels, rela
 - Dados reais nunca ficam em `.cypher`. O Cypher descreve só a projeção e recebe `$rows`.
 - `MERGE` em vez de `CREATE`, com `graph_key = source|sync_version|id`. Cada execução usa uma `sync_version` própria, então duas execuções nunca disputam os mesmos nós.
 - A regra de técnico elegível vive em um único fragmento SQL (`eligible_technician`, em `src/extract.sql`), incluído pelas consultas que dependem dela: usuário ativo e `technician.status = 'APPROVED'`.
-- O SQL segue o schema real do `database-console/db/core`. Os testes de integração rodam contra esse schema carregado em um PostgreSQL de teste.
+- O SQL lê somente as 23 views do schema `export` (papel `ro_bootstrap`), nunca `public`. O baseline do `coredb` vem do Flyway do `api-core`; os testes de integração rodam contra esse baseline e as views carregados em um PostgreSQL de teste.
 - Os campos `name` de técnicos são anonimizados (`Profissional <início do id>`), como no sync original.
 - O repositório não é um pacote Python instalável: roda como `python src/main.py` com dependências em `requirements.txt`. Não há `setup.py`, `pyproject` de build nem metadados `.egg-info`.
 
