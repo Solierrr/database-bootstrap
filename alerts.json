@@ -1,0 +1,7 @@
+{
+  "service": "database-bootstrap",
+  "aliases": [
+    "database-bootstrap"
+  ],
+  "project": "DB"
+}
