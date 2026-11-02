@@ -1,72 +1,58 @@
-# Rodando localmente
+<p align="center">
+  <img src="../assets/readme/banners/neo4j.png" alt="Neo4j" width="100%">
+</p>
 
-Requisitos: Python 3.14, Docker e `psql`.
+# Execução local
 
-## Instalação
+Requer Python 3.14, acesso a PostgreSQL e Neo4j compatíveis com as queries, make e shell. O guia comum está em [Python](https://github.com/Solierrr/docs-warehouse/blob/main/readme/running/PYTHON.md).
 
-```bash
-python -m venv .venv
-.venv/bin/python -m pip install -r requirements.dev.txt
-```
+## Preparar
 
-No Windows, use `.venv/Scripts/python`.
-
-## Bancos descartáveis
+Executar no checkout do job.
 
 ```bash
-docker run -d --name bootstrap-neo4j -p 127.0.0.1:7687:7687 \
-  -e NEO4J_AUTH=neo4j/test-password-for-ci \
-  -e NEO4J_initial_dbms_default__database=feeddb \
-  neo4j:5.26-community
-
-docker run -d --name bootstrap-postgres -p 127.0.0.1:5432:5432 \
-  -e POSTGRES_PASSWORD=test-password-for-ci -e POSTGRES_DB=coredb \
-  postgres:16
+make doctor
+make vault
+make install
 ```
 
-Carregue o schema do `api-core` a partir de um checkout de `Solierrr/database-console`:
+O `make vault` lê as pastas `/database` e `/recommendation`, conforme o Makefile, mas o orquestrador não carrega o `.env` sozinho, por isso as variáveis precisam ser exportadas no shell ou passadas ao container antes da execução.
 
 ```bash
-PGHOST=127.0.0.1 PGUSER=postgres PGPASSWORD=test-password-for-ci PGDATABASE=coredb \
-  sh scripts/load-core-schema.sh ../database-console
+set -a
+. ./.env
+set +a
+make dev
 ```
 
-Se alguma porta já estiver em uso, troque o lado esquerdo do `-p` e ajuste as variáveis abaixo.
+O `make dev` executa uma carga real que escreve no Neo4j, e não um servidor de desenvolvimento, por isso deve apontar para destinos descartáveis ou autorizados para essa finalidade.
 
-## Variáveis
+| Nome | Uso |
+|---|---|
+| `DB_POSTGRES_HOST`, `DB_POSTGRES_CORE`, `DB_POSTGRES_USER`, `DB_POSTGRES_PASSWORD` | Origem |
+| `DB_POSTGRES_PORT`, `DB_POSTGRES_SSLMODE` | Porta e TLS da origem |
+| `DB_NEO4J_URI`, `DB_NEO4J_USER`, `DB_NEO4J_PASSWORD`, `DB_NEO4J_FEED` | Destino |
+| `SYNC_BATCH_SIZE` | Lote, padrão 500 |
+| `SYNC_LOCK_LEASE_SECONDS` | Lease, padrão 900 segundos |
+| `SYNC_MIN_DOMAIN_RETENTION_RATIO` | Mínimo relativo por domínio, padrão 0.5 |
+| `NEO4J_WAIT_SECONDS` | Espera inicial de conectividade, padrão 300 segundos |
 
-```bash
-export DB_POSTGRES_HOST=127.0.0.1 DB_POSTGRES_PORT=5432 DB_POSTGRES_CORE=coredb \
-  DB_POSTGRES_USER=postgres DB_POSTGRES_PASSWORD=test-password-for-ci DB_POSTGRES_SSLMODE=disable \
-  DB_NEO4J_URI=bolt://127.0.0.1:7687 DB_NEO4J_USER=neo4j \
-  DB_NEO4J_PASSWORD=test-password-for-ci DB_NEO4J_FEED=feeddb
-```
+A proporção de queda precisa ficar entre zero e um, e uma configuração numérica inválida impede o início. A conexão com o PostgreSQL usa limite de 15 segundos e TLS `require` por padrão, e a do Neo4j usa limite de 10 segundos e um pool de até cinco conexões.
 
-## Executar o job
+## Verificações
 
-```bash
-.venv/bin/python src/main.py
-```
+O `make lint` roda o Ruff, o `make build` compila `src` e o `make test` não tem comando configurado, porque esta main não tem a suíte `tests/` citada nos textos antigos. O CI constrói o container, importa o módulo e confirma a saída 64 sem configuração, o que não substitui um teste integrado do grafo.
 
-## Testes
+Não há `make openapi`, Swagger ou API própria.
 
-Unitários, sem bancos:
+| Saída | Significado |
+|---|---|
+| 0 | Snapshot ativado |
+| 1 | Falha inesperada |
+| 2 | Outra execução possui o lock |
+| 3 | Snapshot inseguro, contagem divergente ou posse perdida |
+| 64 | Configuração ausente ou inválida |
 
-```bash
-.venv/bin/python -m pytest tests/unit
-```
+Confira se o extrator está alinhado ao schema atual do `api-core` antes de executar. A rotina auxiliar de schema é externa ao carregamento normal e não corrige automaticamente uma incompatibilidade.
 
-Integração, com os bancos acima. Eles apagam e recriam dados, então só rodam com a confirmação explícita:
-
-```bash
-BOOTSTRAP_TEST_ALLOW_DESTRUCTIVE=true .venv/bin/python -m pytest
-```
-
-Nunca aponte essas variáveis para o banco real: os testes truncam as tabelas do `coredb` e apagam todo o grafo.
-
-## Imagem
-
-```bash
-docker build -t database-bootstrap .
-docker run --rm --env-file .env database-bootstrap
-```
+Fontes em [Makefile](https://github.com/Solierrr/database-bootstrap/blob/main/Makefile), [CI](https://github.com/Solierrr/database-bootstrap/blob/main/.github/workflows/ci.yml) e [configuração](https://github.com/Solierrr/database-bootstrap/blob/main/src/config.json).
