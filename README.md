@@ -27,7 +27,6 @@ Python transporta os dados do PostgreSQL para o Neo4j. SQL define a extração e
 - [STATUS.md](./docs/STATUS.md), limitações e diferenças verificadas.
 - [Fluxos](./flows/), reconstrução, ativação e recuperação.
 - [NEO4J.md](./database/NEO4J.md), modelo, propriedades e índices.
-- [PENDENCIAS.md](./PENDENCIAS.md), confirmações do responsável.
 
 ## Contribuindo
 
